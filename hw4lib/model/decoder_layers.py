@@ -21,7 +21,7 @@ Each layer follows a Pre-LN (Layer Normalization) architecture where:
 - Residual connections wrap around each sublayer
 
 Implementation Steps for Each Layer:
-1. Initialize the required sublayers in __init__:
+1. Initialize the required sublayers in _init_:
    - SelfAttentionLayer for masked self-attention
    - CrossAttentionLayer for cross-attention (in CrossAttentionDecoderLayer only)
    - FeedForwardLayer for position-wise processing
@@ -50,12 +50,12 @@ class SelfAttentionDecoderLayer(nn.Module):
             dropout (float): The dropout rate.
         ''' 
         super().__init__()
-        # TODO: Implement __init__
+        # TODO: Implement _init_
        
         # TODO: Initialize the sublayers      
-        self.self_attn = NotImplementedError # Masked self-attention layer
-        self.ffn = NotImplementedError # Feed-forward network
-        raise NotImplementedError # Remove once implemented
+        self.self_attn = SelfAttentionLayer(d_model, num_heads, dropout)  # Masked self-attention layer
+        self.ffn = FeedForwardLayer(d_model, d_ff, dropout)               # Feed-forward network
+        #raise NotImplementedError # Remove once implemented
 
     def forward(self, x: torch.Tensor, key_padding_mask: Optional[torch.Tensor] = None, attn_mask: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
         '''
@@ -71,10 +71,14 @@ class SelfAttentionDecoderLayer(nn.Module):
         '''
         # TODO: Implement forward: Follow the figure in the writeup
 
-        x, mha_attn_weights = NotImplementedError, NotImplementedError
-        
-        # TODO: Return the output tensor and attention weights
-        raise NotImplementedError # Remove once implemented
+        x_norm = x
+        x_attn, mha_attn_weights = self.self_attn(x_norm, key_padding_mask=key_padding_mask, attn_mask=attn_mask)
+        x = x + x_attn
+        x_norm = x
+        x = self.ffn(x_norm)  # ✅ No residual after this
+
+         # TODO: Return the output tensor and attention weights
+        return x, mha_attn_weights
 
 ## -------------------------------------------------------------------------------------------------    
 class CrossAttentionDecoderLayer(nn.Module):
@@ -92,13 +96,13 @@ class CrossAttentionDecoderLayer(nn.Module):
             dropout (float): The dropout rate.
         '''
         super().__init__()
-        # TODO: Implement __init__
+        # TODO: Implement _init_
 
         # TODO: Initialize the sublayers  
-        self.self_attn  = NotImplementedError # Masked self-attention layer
-        self.cross_attn = NotImplementedError # Cross-attention layer
-        self.ffn        = NotImplementedError # Feed-forward network
-        raise NotImplementedError # Remove once implemented
+        self.self_attn  = SelfAttentionLayer(d_model, num_heads, dropout) # Masked self-attention layer
+        self.cross_attn = CrossAttentionLayer(d_model, num_heads, dropout) # Cross-attention layer
+        self.ffn        = FeedForwardLayer(d_model, d_ff, dropout) # Feed-forward network
+        #raise NotImplementedError # Remove once implemented
 
     def forward(self, x: torch.Tensor, enc_output: torch.Tensor, dec_key_padding_mask: Optional[torch.Tensor] = None, enc_key_padding_mask: Optional[torch.Tensor] = None, attn_mask: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         '''
@@ -116,9 +120,11 @@ class CrossAttentionDecoderLayer(nn.Module):
         '''
         # TODO: Implement forward: Follow the figure in the writeup
 
-        x, self_attn_weights  = NotImplementedError, NotImplementedError
-        x, cross_attn_weights = NotImplementedError, NotImplementedError
+        x, self_attn_weights  = self.self_attn(x, key_padding_mask=dec_key_padding_mask, attn_mask=attn_mask)
+        x, cross_attn_weights = self.cross_attn(x, enc_output, key_padding_mask=enc_key_padding_mask)
 
+        x = self.ffn(x)
+        return x, self_attn_weights, cross_attn_weights
         # TODO: Return the output tensor and attention weights    
-        raise NotImplementedError # Remove once implemented
-## -------------------------------------------------------------------------------------------------    
+        #raise NotImplementedError # Remove once implemented
+## -------------------------------------------------------------------------------------------------

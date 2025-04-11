@@ -72,64 +72,46 @@ class ASRDataset(Dataset):
                                           Should only be None for training set.
                                           Should be provided for dev and test sets.
         """
-        # TODO: Implement __init__
-        #raise NotImplementedError # Remove once implemented
+        # TODO: Implement _init_
+        
     
         # Store basic configuration
         self.config    = config
         self.partition = partition
-        #print(f"Partition: {self.partition}")
         self.isTrainPartition = isTrainPartition
-        #print(f"Is Train Partition: {self.isTrainPartition}")
         self.tokenizer = tokenizer
 
         # TODO: Get tokenizer ids for special tokens (eos, sos, pad)
         # Hint: See the class members of the H4Tokenizer class
-        #self.eos_token = NotImplementedError
-        #self.sos_token = NotImplementedError
-        #self.pad_token = NotImplementedError
-        
-        self.eos_token = self.tokenizer.eos_id
-        self.sos_token = self.tokenizer.sos_id
-        self.pad_token = self.tokenizer.pad_id
+        self.eos_token = tokenizer.eos_id
+        self.sos_token = tokenizer.sos_id
+        self.pad_token = tokenizer.pad_id
 
         # Set up data paths 
         # TODO: Use root and partition to get the feature directory
-        #self.fbank_dir   = NotImplementedError
-        
-        self.fbank_dir   = os.path.join(self.config['root'], self.partition,"fbank")
+        self.fbank_dir = os.path.join(config['root'], partition, 'fbank')
         
         # TODO: Get all feature files in the feature directory in sorted order  
-        #self.fbank_files = NotImplementedError
         self.fbank_files = sorted([os.path.join(self.fbank_dir, f) for f in os.listdir(self.fbank_dir) if f.endswith('.npy')])
         
-        
         # TODO: Take subset
-        #subset_size      = NotImplementedError
-        #self.fbank_files = NotImplementedError
-        subset_size      = self.config.get('subset_size', None)
-        if subset_size is not None and subset_size > 0:
-            self.fbank_files = self.fbank_files[:subset_size]
+        subset_size = config.get('subset_size', len(self.fbank_files))
+        self.fbank_files = self.fbank_files[:subset_size]
         
         # TODO: Get the number of samples in the dataset  
-        #self.length      = NotImplementedError
-        self.length      = len(self.fbank_files)
+        self.length = len(self.fbank_files)
 
         # Case on partition.
-        # Why will test-clean need to be handled differently? - we want test to be as close to real-world as possible.
+        # Why will test-clean need to be handled differently?
         if self.partition != "test-clean":
             # TODO: Use root and partition to get the text directory
-            #self.text_dir   = NotImplementedError
-            self.text_dir   = os.path.join(self.config['root'], self.partition, "text")
-            
+            self.text_dir = os.path.join(config['root'], partition, 'text')
 
             # TODO: Get all text files in the text directory in sorted order  
-            #self.text_files = NotImplementedError
             self.text_files = sorted([os.path.join(self.text_dir, f) for f in os.listdir(self.text_dir) if f.endswith('.npy')])
-            print ("text file: ",self.text_files)    
+            
             # TODO: Take subset
-            #self.text_files = NotImplementedError
-            self.text_files = self.text_files[:subset_size] if subset_size is not None and subset_size > 0 else self.text_files
+            self.text_files = self.text_files[:subset_size]
             
             # Verify data alignment
             if len(self.fbank_files) != len(self.text_files):
@@ -161,12 +143,9 @@ class ASRDataset(Dataset):
         for i in tqdm(range(self.length)):
             # TODO: Load features
             # Features are of shape (num_feats, time)
-            #feat = NotImplementedError
             feat = np.load(self.fbank_files[i])
-            feat = torch.FloatTensor(feat)  # (num_feats, time)
 
             # TODO: Truncate features to num_feats set by you in the config
-            #feat = NotImplementedError
             feat = feat[:self.config['num_feats'], :]
 
             # Append to self.feats (num_feats is set by you in the config)
@@ -192,14 +171,12 @@ class ASRDataset(Dataset):
             if self.partition != "test-clean":
                 # TODO: Load the transcript
                 # Note: Use np.load to load the numpy array and convert to list and then join to string 
-                #transcript = NotImplementedError
                 transcript = ''.join(np.load(self.text_files[i]).tolist())
 
                 # TODO: Track character count (before tokenization)
                 self.total_chars += len(transcript)
 
                 # TODO: Use tokenizer to encode the transcript (see tokenizer.encode for details)
-                #tokenized = NotImplementedError
                 tokenized = self.tokenizer.encode(transcript)
 
                 # Track token count (excluding special tokens)
@@ -211,8 +188,6 @@ class ASRDataset(Dataset):
                 self.text_max_len = max(self.text_max_len, len(tokenized)+1)
                 
                 # TODO: Create shifted and golden versions by adding sos and eos tokens   
-                #self.transcripts_shifted.append(NotImplementedError)
-                #self.transcripts_golden.append(NotImplementedError)
                 self.transcripts_shifted.append([self.sos_token] + tokenized)
                 self.transcripts_golden.append(tokenized + [self.eos_token])
 
@@ -257,8 +232,7 @@ class ASRDataset(Dataset):
         Return the number of samples in the dataset.
         DO NOT MODIFY
         """
-        # TODO: Implement __len__
-        #raise NotImplementedError
+        # TODO: Implement _len_
         return self.length
 
     def __getitem__(self, idx) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -275,9 +249,7 @@ class ASRDataset(Dataset):
                 - golden_transcript: LongTensor  (time) or None
         """
         # TODO: Load features
-        #feat = NotImplementedError
-        feat = self.feats[idx]
-        #raise NotImplementedError
+        feat = torch.FloatTensor(self.feats[idx])
 
         # TODO: Apply normalization
         if self.config['norm'] == 'global_mvn':
@@ -292,20 +264,18 @@ class ASRDataset(Dataset):
         shifted_transcript, golden_transcript = None, None
         if self.partition != "test-clean":
             # TODO: Get transcripts for non-test partitions
-            #shifted_transcript = NotImplementedError
-            #golden_transcript  = NotImplementedError
             shifted_transcript = torch.LongTensor(self.transcripts_shifted[idx])
             golden_transcript = torch.LongTensor(self.transcripts_golden[idx])
+    
 
-        return feat,shifted_transcript,golden_transcript
-        #raise NotImplementedError # Remove once implemented
+        return feat, shifted_transcript, golden_transcript # Remove once implemented
 
     def collate_fn(self, batch) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Collate and pad a batch of samples to create a batch of fixed-length padded features and transcripts.
 
         Args:
-            batch (list): List of samples from getitem
+            batch (list): List of samples from _getitem_
 
         Returns:
             tuple: (padded_features, padded_shifted, padded_golden, feat_lengths, transcript_lengths) where:
