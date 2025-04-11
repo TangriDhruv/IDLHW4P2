@@ -78,9 +78,9 @@ class ASRDataset(Dataset):
         # Store basic configuration
         self.config    = config
         self.partition = partition
-        print(f"Partition: {self.partition}")
+        #print(f"Partition: {self.partition}")
         self.isTrainPartition = isTrainPartition
-        print(f"Is Train Partition: {self.isTrainPartition}")
+        #print(f"Is Train Partition: {self.isTrainPartition}")
         self.tokenizer = tokenizer
 
         # TODO: Get tokenizer ids for special tokens (eos, sos, pad)
@@ -96,13 +96,13 @@ class ASRDataset(Dataset):
         # Set up data paths 
         # TODO: Use root and partition to get the feature directory
         #self.fbank_dir   = NotImplementedError
-        print("root path: ", self.config['root'])
+        
         self.fbank_dir   = os.path.join(self.config['root'], self.partition,"fbank")
         
         # TODO: Get all feature files in the feature directory in sorted order  
         #self.fbank_files = NotImplementedError
         self.fbank_files = sorted([os.path.join(self.fbank_dir, f) for f in os.listdir(self.fbank_dir) if f.endswith('.npy')])
-        print("fbank file: ",self.fbank_files)
+        
         
         # TODO: Take subset
         #subset_size      = NotImplementedError
