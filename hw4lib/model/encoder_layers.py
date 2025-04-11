@@ -57,6 +57,6 @@ class SelfAttentionEncoderLayer(nn.Module):
         residual = x
         norm2 = self.norm2(x)
         ffn_output = self.ffn(norm2)
-        x = residual + self.dropout(ffn_output)  # Direct FFN output without residual connection
+        x = ffn_output  # Direct FFN output without residual connection
         
         return x, mha_attn_weights

@@ -215,143 +215,99 @@ class ASRTrainer(BaseTrainer):
     def _validate_epoch(self, dataloader):
         """
         Validate for one epoch.
-        
+    
         Args:
             dataloader: DataLoader for validation data
         Returns:
             Tuple[Dict[str, float], List[Dict[str, Any]]]: Validation metrics and recognition results
         """
-        # TODO: In-fill the _validate_epoch method
-        
-
-        # TODO: Call recognize
-        results = self.recognize(dataloader)
-        
-        # TODO: Extract references and hypotheses from results
-        references = [r['target'] for r in results]
-        hypotheses = [r['generated'] for r in results]
-        
-        # Calculate metrics on full batch
-        metrics = self._calculate_asr_metrics(references, hypotheses)
-        
-        return metrics, results
+        # Set model to evaluation mode
+        self.model.eval()
     
-    def train(self, train_dataloader, val_dataloader, epochs: int):
-        """
-        Full training loop for ASR training.
-        
-        Args:
-            train_dataloader: DataLoader for training data
-            val_dataloader: DataLoader for validation data
-            epochs: int, number of epochs to train
-        """
-        if self.scheduler is None:
-            raise ValueError("Scheduler is not initialized, initialize it first!")
-        
-        if self.optimizer is None:
-            raise ValueError("Optimizer is not initialized, initialize it first!")
-        
-        # TODO: In-fill the train method
-        
-
-        # Set max transcript length
-        self.text_max_len = max(val_dataloader.dataset.text_max_len, train_dataloader.dataset.text_max_len)
-
-        # Training loop
-        best_val_loss = float('inf')
-        best_val_wer  = float('inf')
-        best_val_cer  = float('inf')
-        best_val_dist = float('inf')
-
-        for epoch in range(self.current_epoch, self.current_epoch + epochs):
-
-            # TODO: Train for one epoch
-            train_metrics, train_attn = self._train_epoch(train_dataloader)
-          
-            # TODO: Validate
-            val_metrics, val_results = self._validate_epoch(val_dataloader)
-
-            # Step ReduceLROnPlateau scheduler with validation loss
-            if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-                self.scheduler.step(val_metrics['cer'])
+        # Run recognition on validation set
+        batch_bar = tqdm(total=len(dataloader), dynamic_ncols=True, leave=False, position=0, desc="[Validating ASR]")
+    
+        # Use recognize method to generate transcriptions
+        # We use the default recognition config with greedy search
+        results = self.recognize(dataloader)
+    
+        # Extract references and hypotheses from results
+        references = [r['target'] for r in results if 'target' in r]
+        hypotheses = [r['generated'] for r in results]
+    
+        # Calculate evaluation metrics
+        metrics = self._calculate_asr_metrics(references, hypotheses)
+    
+        # Calculate validation loss
+        running_ce_loss = 0.0
+        running_ctc_loss = 0.0
+        running_joint_loss = 0.0
+        total_tokens = 0
+    
+        # Calculate loss on validation set
+        with torch.inference_mode():
+            for batch in tqdm(dataloader, desc="Calculating validation loss", leave=False):
+                padded_features, padded_shifted, padded_golden, feat_lengths, transcript_lengths = batch
             
-            # Log metrics
-            metrics = {
-                'train': train_metrics,
-                'val': val_metrics
-            }
-            self._log_metrics(metrics, epoch)
-
-            # Save attention plots
-            train_attn_keys = list(train_attn.keys())
-            if train_attn_keys: 
-                # Get the first self-attention and cross-attention layers
-                decoder_self_keys  = [k for k in train_attn_keys if 'dec_self' in k]
-                decoder_cross_keys = [k for k in train_attn_keys if 'dec_cross' in k]
+                feats = padded_features.to(self.device)
+                targets_shifted = padded_shifted.to(self.device) 
+                targets_golden = padded_golden.to(self.device)   
+                feat_lengths = feat_lengths.to(self.device)
+                transcript_lengths = transcript_lengths.to(self.device)
+            
+                # Get model predictions
+                seq_out, _, ctc_inputs = self.model(feats, targets_shifted, feat_lengths, transcript_lengths)
+            
+                # Calculate CE loss
+                ce_loss = self.ce_criterion(seq_out.view(-1, self.tokenizer.vocab_size), targets_golden.view(-1))
+            
+                # Calculate CTC loss if needed
+                if self.ctc_weight > 0:
+                    ctc_log_probs = ctc_inputs['log_probs']
+                    ctc_input_lengths = ctc_inputs['lengths'].to(self.device)
                 
-                if decoder_self_keys:
-                    # Plot first layer (layer1) if available
-                    first_self_key = decoder_self_keys[0]
-                    if first_self_key in train_attn:
-                        self._save_attention_plot(train_attn[first_self_key][0], epoch, "decoder_self")
-                
-                if decoder_cross_keys:
-                    # Plot last layer if available
-                    last_cross_key = decoder_cross_keys[-1]
-                    if last_cross_key in train_attn:
-                        self._save_attention_plot(train_attn[last_cross_key][0], epoch, "decoder_cross")
+                    ctc_loss = self.ctc_criterion(
+                        log_probs=ctc_log_probs,
+                        targets=targets_golden,
+                        input_lengths=ctc_input_lengths,
+                        target_lengths=transcript_lengths
+                    )
+                    loss = ce_loss + self.ctc_weight * ctc_loss
+                else:
+                    ctc_loss = torch.tensor(0.0)
+                    loss = ce_loss
             
-            # Save generated text
-            self._save_generated_text(val_results, f'val_epoch{epoch}')
+                # Calculate metrics
+                batch_tokens = transcript_lengths.sum().item()
+                total_tokens += batch_tokens
+                running_ce_loss += ce_loss.item() * batch_tokens
+                if self.ctc_weight > 0:
+                    running_ctc_loss += ctc_loss.item() * batch_tokens
+                    running_joint_loss += loss.item() * batch_tokens
             
-            # Save checkpoints
-            self.save_checkpoint('checkpoint-last-epoch-model.pth')
-            
-            # Check if this is the best model
-            if val_metrics['cer'] < best_val_cer:
-                best_val_cer = val_metrics['cer']
-                self.best_metric = val_metrics['cer']
-                self.save_checkpoint('checkpoint-best-metric-model.pth') 
-
-            self.current_epoch += 1
-                
-
-    def evaluate(self, dataloader, max_length: Optional[int] = None) -> Dict[str, Dict[str, float]]:
-        """
-        Evaluate the model on the test set. Sequentially evaluates with each recognition config.
+                # Clean up
+                del feats, targets_shifted, targets_golden, feat_lengths, transcript_lengths
+                del seq_out, ctc_inputs, loss
+                torch.cuda.empty_cache()
+    
+        # Compute final metrics
+        if total_tokens > 0:
+            avg_ce_loss = running_ce_loss / total_tokens
+            avg_ctc_loss = running_ctc_loss / total_tokens
+            avg_joint_loss = running_joint_loss / total_tokens
+            avg_perplexity_token = torch.exp(torch.tensor(avg_ce_loss))
+            avg_perplexity_char = torch.exp(torch.tensor(avg_ce_loss / dataloader.dataset.get_avg_chars_per_token()))
         
-        Args:
-            dataloader: DataLoader for test data
-            max_length: Optional[int], maximum length of the generated sequence
-        Returns:
-            Dictionary containing recognition results for each recognition config
-            Each result is a pandas DataFrame with columns 'id' and 'transcription'
-        """
-
-        # Get recognition configs
-        recognition_configs = self._get_evaluation_recognition_configs()
-        
-        eval_results = {}
-        # Evaluate with each recognition config
-        for config_name, config in recognition_configs.items():
-            try:
-                print(f"Evaluating with {config_name} config")
-                results = self.recognize(dataloader, config, config_name, max_length)     
-                # Calculate metrics on full batch
-                generated = [r['generated'] for r in results]
-                results_df = pd.DataFrame(
-                    {
-                        'id': range(len(generated)),
-                        'transcription': generated
-                    }
-                )
-                eval_results[config_name] = results_df
-                self._save_generated_text(results, f'test{config_name}_results')
-            except Exception as e:
-                print(f"Error evaluating with {config_name} config: {e}")
-                continue
-        
-        return eval_results
+            # Add loss metrics to the results
+            metrics.update({
+                'ce_loss': avg_ce_loss,
+                'ctc_loss': avg_ctc_loss,
+                'joint_loss': avg_joint_loss,
+                'perplexity_token': avg_perplexity_token.item(),
+                'perplexity_char': avg_perplexity_char.item()
+            })
+    
+        return metrics, results
 
     def recognize(self, dataloader, recognition_config: Optional[Dict[str, Any]] = None, config_name: Optional[str] = None, max_length: Optional[int] = None) -> List[Dict[str, Any]]:
         """

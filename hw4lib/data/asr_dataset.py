@@ -72,9 +72,7 @@ class ASRDataset(Dataset):
                                           Should only be None for training set.
                                           Should be provided for dev and test sets.
         """
-        # TODO: Implement _init_
         
-    
         # Store basic configuration
         self.config    = config
         self.partition = partition
